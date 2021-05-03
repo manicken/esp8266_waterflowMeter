@@ -6,6 +6,7 @@
 #include <ESP8266httpUpdate.h>
 #include <EEPROM.h>
 #include "TCP2UART.h"
+#include "SPI.h"
 
 #include <ArduinoOTA.h>
 static int otaPartProcentCount = 0;
@@ -28,34 +29,198 @@ extern const char main_js[];
 #define WIFI_TIMEOUT 30000              // checks WiFi every ...ms. Reset after this time, if WiFi cannot reconnect.
 #define HTTP_PORT 80
 
+#define DOGM_LCD_CS 0
+#define DOGM_LCD_RS 4
+
+#define PULSE_INPUT 5
+
 unsigned long auto_last_change = 0;
 unsigned long last_wifi_check_time = 0;
 
 ESP8266WebServer server(HTTP_PORT);
 
+uint8_t changed = 0;
+uint32_t count = 0;
 
 void printESP_info(void);
 void checkForUpdates(void);
 void setup_BasicOTA(void);
+void sendOneSpiByte(uint8_t data);
+void DOGM_LCD_init(void);
+void DOGM_LCD_setCursor(uint8_t row, uint8_t col);
+void DOGM_LCD_writeStr(const char *p);
+void waterMeter_ISR(void);
+void DOGM_LCD_write12digitDec(uint32_t value);
 
 void setup() {
+    DOGM_LCD_init();
+    DOGM_LCD_setCursor(0, 0);
+    DOGM_LCD_writeStr("STARTING...");
+
     DEBUG_UART.begin(115200);
     DEBUG_UART.println(F("\r\n!!!!!Start of MAIN Setup!!!!!\r\n"));
     printESP_info();
     
     WiFiManager wifiManager;
     DEBUG_UART.println(F("trying to connect to saved wifi"));
+    DOGM_LCD_setCursor(1, 0);
+    DOGM_LCD_writeStr("WIFI CONNECTING.");
     wifiManager.autoConnect(); // using ESP.getChipId() internally
-    checkForUpdates();
+    //checkForUpdates();
     setup_BasicOTA();
     tcp2uart.begin();
 
+    DOGM_LCD_setCursor(0, 0);
+    DOGM_LCD_writeStr("RAW:000000000000");
+    
+    DOGM_LCD_setCursor(1, 0);
+    DOGM_LCD_writeStr("LITERS:0000000.0");
+    
+    DOGM_LCD_setCursor(2, 0);
+    DOGM_LCD_writeStr("LITER/MIN:0000.0");
+
+    pinMode(PULSE_INPUT, INPUT);
+    //attachInterrupt(digitalPinToInterrupt(PULSE_INPUT), waterMeter_ISR, RISING);
+
+    DOGM_LCD_setCursor(0, 4);
+    DOGM_LCD_write12digitDec(123456789);
+    
     DEBUG_UART.println(F("\r\n!!!!!End of MAIN Setup!!!!!\r\n"));
+}
+
+void waterMeter_ISR(void) {
+    changed = 1;
+    count++;
+}
+
+void DOGM_LCD_writeOneDigit(uint8_t val) {
+    sendOneSpiByte(0x30 + val);
+    delayMicroseconds(30);
+}
+
+void DOGM_LCD_write12digitDec(uint32_t value) {
+    uint32_t rest = value;
+    DOGM_LCD_writeOneDigit(rest / 100000000000);
+    rest = rest % 100000000000;
+    DOGM_LCD_writeOneDigit(rest / 10000000000);
+    rest = rest % 10000000000;
+    DOGM_LCD_writeOneDigit(rest / 1000000000);
+    rest = rest % 1000000000;
+    DOGM_LCD_writeOneDigit(rest / 100000000);
+    rest = rest % 100000000;
+    DOGM_LCD_writeOneDigit(rest / 10000000);
+    rest = rest % 10000000;
+    DOGM_LCD_writeOneDigit(rest / 1000000);
+    rest = rest % 1000000;
+    DOGM_LCD_writeOneDigit(rest / 100000);
+    rest = rest % 100000;
+    DOGM_LCD_writeOneDigit(rest / 10000);
+    rest = rest % 10000;
+    DOGM_LCD_writeOneDigit(rest / 1000);
+    rest = rest % 1000;
+    DOGM_LCD_writeOneDigit(rest / 100);
+    rest = rest % 100;
+    DOGM_LCD_writeOneDigit(rest / 10);
+    rest = rest % 10;
+    DOGM_LCD_writeOneDigit(rest);
 }
 
 void loop() {
     tcp2uart.BridgeMainTask();
     ArduinoOTA.handle();
+
+    if (changed == 1) {
+        changed = 0;
+        DOGM_LCD_setCursor(0, 4);
+        DOGM_LCD_write12digitDec(count);
+        //DOGM_LCD_writeStr("000000000000");
+    }
+
+/*
+    digitalWrite(DOGM_LCD_CS, LOW); // enable Slave Select
+    digitalWrite(DOGM_LCD_RS, LOW);
+    SPI.transfer(0xAA);
+
+    digitalWrite(DOGM_LCD_RS, HIGH);
+    SPI.transfer(0x55);
+    digitalWrite(DOGM_LCD_CS, HIGH); // disable Slave Select
+    */
+}
+
+void DOGM_LCD_writeStr(const char *p) {
+    while (*p != 0) {
+        sendOneSpiByte(*p);
+        delayMicroseconds(30);
+        p++;
+    }
+}
+
+void DOGM_LCD_setCursor(uint8_t row, uint8_t col) {
+    if (row > 2) row = 2;
+    if (col > 0x1F) col = 0x1F;
+
+    digitalWrite(4, LOW); // Instruction
+    delayMicroseconds(1);
+    sendOneSpiByte(0x80 + row*0x10 + col); // second row
+    delayMicroseconds(30);
+    digitalWrite(4, HIGH); // data (default)
+    delayMicroseconds(1);
+}
+
+void DOGM_LCD_init(void) {
+// DOGM LCD SPI CS
+    digitalWrite(DOGM_LCD_CS, HIGH);
+    pinMode(DOGM_LCD_CS, OUTPUT);
+    // DOGM LCD RS
+    pinMode(DOGM_LCD_RS, OUTPUT);
+    digitalWrite(DOGM_LCD_RS, LOW);
+    pinMode(DOGM_LCD_RS, OUTPUT);
+
+    SPI.begin();
+    SPI.setClockDivider(SPI_CLOCK_DIV8);
+    SPI.setDataMode(SPI_MODE3);
+    SPI.setHwCs(false);
+    SPI.setBitOrder(MSBFIRST);
+
+    delay(40);
+
+    sendOneSpiByte(0x39); // 8 bit data length, 2 lines, instruction table 1
+    delayMicroseconds(30);
+    
+    sendOneSpiByte(0x39);
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x15); // BS: 1/5, 3 line LCD
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x56); // booster on, contrast C5, set C4
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x6E); // set voltage follower and gain
+    delay(300); // wait for power to stabilize
+
+    sendOneSpiByte(0x70); // set contrast C3, C2, C1
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x38); // switch back to instruction table 0
+    delayMicroseconds(30);
+
+    //sendOneSpiByte(0x0F); // display on, cursor on, cursor blink
+    //delayMicroseconds(30);
+    sendOneSpiByte(0x0C); // display on, cursor off, cursor not blink
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x01); // clear display, cursor at home
+    delayMicroseconds(30);
+
+    sendOneSpiByte(0x06); // cursor auto-increment
+    delayMicroseconds(30);
+}
+
+void sendOneSpiByte(uint8_t data) {
+    digitalWrite(DOGM_LCD_CS, LOW); // enable chip Select
+    SPI.transfer(data);
+    digitalWrite(DOGM_LCD_CS, HIGH); // disable chip Select
 }
 
 void checkForUpdates(void)
