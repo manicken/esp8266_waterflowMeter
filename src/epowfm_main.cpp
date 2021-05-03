@@ -30,9 +30,10 @@ extern const char main_js[];
 #define HTTP_PORT 80
 
 #define DOGM_LCD_CS 0
-#define DOGM_LCD_RS 4
+#define DOGM_LCD_RS 5
 
-#define PULSE_INPUT 5
+#define PULSE_INPUT 4
+
 
 unsigned long auto_last_change = 0;
 unsigned long last_wifi_check_time = 0;
@@ -49,7 +50,7 @@ void sendOneSpiByte(uint8_t data);
 void DOGM_LCD_init(void);
 void DOGM_LCD_setCursor(uint8_t row, uint8_t col);
 void DOGM_LCD_writeStr(const char *p);
-void waterMeter_ISR(void);
+void waterMeter_ISR();
 void DOGM_LCD_write12digitDec(uint32_t value);
 
 void setup() {
@@ -71,7 +72,7 @@ void setup() {
     tcp2uart.begin();
 
     DOGM_LCD_setCursor(0, 0);
-    DOGM_LCD_writeStr("RAW:000000000000");
+    DOGM_LCD_writeStr("RAW:");
     
     DOGM_LCD_setCursor(1, 0);
     DOGM_LCD_writeStr("LITERS:0000000.0");
@@ -79,16 +80,25 @@ void setup() {
     DOGM_LCD_setCursor(2, 0);
     DOGM_LCD_writeStr("LITER/MIN:0000.0");
 
-    pinMode(PULSE_INPUT, INPUT);
-    //attachInterrupt(digitalPinToInterrupt(PULSE_INPUT), waterMeter_ISR, RISING);
-
-    DOGM_LCD_setCursor(0, 4);
-    DOGM_LCD_write12digitDec(123456789);
+    pinMode(PULSE_INPUT, INPUT_PULLUP);
+    uint8_t intPin = digitalPinToInterrupt(PULSE_INPUT);
+    if (intPin != NOT_AN_INTERRUPT)
+    {
+        attachInterrupt(intPin, waterMeter_ISR, RISING);
+        DOGM_LCD_setCursor(0, 4);
+        DOGM_LCD_write12digitDec(0); // set all to zero
+    }
+    else
+    {
+        DOGM_LCD_setCursor(0, 4);
+        DOGM_LCD_writeStr("int erroe");
+    }
+    
     
     DEBUG_UART.println(F("\r\n!!!!!End of MAIN Setup!!!!!\r\n"));
 }
 
-void waterMeter_ISR(void) {
+void ICACHE_RAM_ATTR waterMeter_ISR() {
     changed = 1;
     count++;
 }
@@ -159,11 +169,11 @@ void DOGM_LCD_setCursor(uint8_t row, uint8_t col) {
     if (row > 2) row = 2;
     if (col > 0x1F) col = 0x1F;
 
-    digitalWrite(4, LOW); // Instruction
+    digitalWrite(DOGM_LCD_RS, LOW); // Instruction
     delayMicroseconds(1);
     sendOneSpiByte(0x80 + row*0x10 + col); // second row
     delayMicroseconds(30);
-    digitalWrite(4, HIGH); // data (default)
+    digitalWrite(DOGM_LCD_RS, HIGH); // data (default)
     delayMicroseconds(1);
 }
 
@@ -172,7 +182,6 @@ void DOGM_LCD_init(void) {
     digitalWrite(DOGM_LCD_CS, HIGH);
     pinMode(DOGM_LCD_CS, OUTPUT);
     // DOGM LCD RS
-    pinMode(DOGM_LCD_RS, OUTPUT);
     digitalWrite(DOGM_LCD_RS, LOW);
     pinMode(DOGM_LCD_RS, OUTPUT);
 
