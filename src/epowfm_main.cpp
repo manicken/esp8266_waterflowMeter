@@ -13,6 +13,18 @@ static int otaPartProcentCount = 0;
 
 #include <ESP8266WebServer.h>
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+//#include <Fonts/FreeMono9pt7b.h>
+
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 32 // OLED display height, in pixels
+
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 display(128, 32, &Wire, -1); // -1 = no reset pin
+
 #define DEBUG_UART Serial1
 
 TCP2UART tcp2uart;
@@ -32,7 +44,7 @@ extern const char main_js[];
 #define DOGM_LCD_CS 0
 #define DOGM_LCD_RS 5
 
-#define PULSE_INPUT 4
+#define PULSE_INPUT 14
 
 
 unsigned long auto_last_change = 0;
@@ -54,48 +66,94 @@ void waterMeter_ISR();
 void DOGM_LCD_write12digitDec(uint32_t value);
 
 void setup() {
-    DOGM_LCD_init();
-    DOGM_LCD_setCursor(0, 0);
-    DOGM_LCD_writeStr("STARTING...");
-
     DEBUG_UART.begin(115200);
     DEBUG_UART.println(F("\r\n!!!!!Start of MAIN Setup!!!!!\r\n"));
+
+    if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    {
+        display.clearDisplay();
+        //display.setFont(&FreeMono9pt7b);
+        display.setTextSize(1);
+        display.setTextColor(WHITE);
+        display.setCursor(0, 0);
+        // Display static text
+        display.println("Hello world universe");
+        display.setCursor(0, 9);
+        display.println("012345678901234567890");
+        display.setCursor(0, 17);
+        display.println("ABCDEFGHIJKLMNOPQRSTU");
+        display.setCursor(0, 25);
+        display.println("@!\"#-_+?%&/(){[]};:=");
+        display.display(); 
+    }
+    else{
+        DEBUG_UART.println(F("oled init fail"));
+        if (display.begin(SSD1306_SWITCHCAPVCC, 0x3D))
+            DEBUG_UART.println(F("oled addr is 0x3D"));
+    }
+    //DOGM_LCD_init();
+    //DOGM_LCD_setCursor(0, 0);
+    //DOGM_LCD_writeStr("STARTING...");
+
+    
     printESP_info();
     
     WiFiManager wifiManager;
     DEBUG_UART.println(F("trying to connect to saved wifi"));
-    DOGM_LCD_setCursor(1, 0);
-    DOGM_LCD_writeStr("WIFI CONNECTING.");
+    //DOGM_LCD_setCursor(1, 0);
+    //DOGM_LCD_writeStr("WIFI CONNECTING.");
     wifiManager.autoConnect(); // using ESP.getChipId() internally
     //checkForUpdates();
     setup_BasicOTA();
     tcp2uart.begin();
 
-    DOGM_LCD_setCursor(0, 0);
-    DOGM_LCD_writeStr("RAW:");
+    //DOGM_LCD_setCursor(0, 0);
+    //DOGM_LCD_writeStr("RAW:");
     
-    DOGM_LCD_setCursor(1, 0);
-    DOGM_LCD_writeStr("LITERS:0000000.0");
+    //DOGM_LCD_setCursor(1, 0);
+    //DOGM_LCD_writeStr("LITERS:0000000.0");
     
-    DOGM_LCD_setCursor(2, 0);
-    DOGM_LCD_writeStr("LITER/MIN:0000.0");
+    //DOGM_LCD_setCursor(2, 0);
+    //DOGM_LCD_writeStr("LITER/MIN:0000.0");
 
     pinMode(PULSE_INPUT, INPUT_PULLUP);
     uint8_t intPin = digitalPinToInterrupt(PULSE_INPUT);
     if (intPin != NOT_AN_INTERRUPT)
     {
         attachInterrupt(intPin, waterMeter_ISR, RISING);
-        DOGM_LCD_setCursor(0, 4);
-        DOGM_LCD_write12digitDec(0); // set all to zero
+        //DOGM_LCD_setCursor(0, 4);
+        //DOGM_LCD_write12digitDec(0); // set all to zero
     }
     else
     {
-        DOGM_LCD_setCursor(0, 4);
-        DOGM_LCD_writeStr("int erroe");
+        //DOGM_LCD_setCursor(0, 4);
+        //DOGM_LCD_writeStr("int erroe");
     }
     
     
     DEBUG_UART.println(F("\r\n!!!!!End of MAIN Setup!!!!!\r\n"));
+}
+
+void loop() {
+    tcp2uart.BridgeMainTask();
+    ArduinoOTA.handle();
+
+    if (changed == 1) {
+        changed = 0;
+        //DOGM_LCD_setCursor(0, 4);
+        //DOGM_LCD_write12digitDec(count);
+        //DOGM_LCD_writeStr("000000000000");
+    }
+
+/*
+    digitalWrite(DOGM_LCD_CS, LOW); // enable Slave Select
+    digitalWrite(DOGM_LCD_RS, LOW);
+    SPI.transfer(0xAA);
+
+    digitalWrite(DOGM_LCD_RS, HIGH);
+    SPI.transfer(0x55);
+    digitalWrite(DOGM_LCD_CS, HIGH); // disable Slave Select
+    */
 }
 
 void ICACHE_RAM_ATTR waterMeter_ISR() {
@@ -135,27 +193,7 @@ void DOGM_LCD_write12digitDec(uint32_t value) {
     DOGM_LCD_writeOneDigit(rest);
 }
 
-void loop() {
-    tcp2uart.BridgeMainTask();
-    ArduinoOTA.handle();
 
-    if (changed == 1) {
-        changed = 0;
-        DOGM_LCD_setCursor(0, 4);
-        DOGM_LCD_write12digitDec(count);
-        //DOGM_LCD_writeStr("000000000000");
-    }
-
-/*
-    digitalWrite(DOGM_LCD_CS, LOW); // enable Slave Select
-    digitalWrite(DOGM_LCD_RS, LOW);
-    SPI.transfer(0xAA);
-
-    digitalWrite(DOGM_LCD_RS, HIGH);
-    SPI.transfer(0x55);
-    digitalWrite(DOGM_LCD_CS, HIGH); // disable Slave Select
-    */
-}
 
 void DOGM_LCD_writeStr(const char *p) {
     while (*p != 0) {
