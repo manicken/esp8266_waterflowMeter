@@ -44,16 +44,28 @@ extern const char main_js[];
 #define DOGM_LCD_CS 0
 #define DOGM_LCD_RS 5
 
-#define PULSE_INPUT 14
-
+#define PULSE_INPUT_A 12
+#define PULSE_INPUT_B 13
 
 unsigned long auto_last_change = 0;
 unsigned long last_wifi_check_time = 0;
 
 ESP8266WebServer server(HTTP_PORT);
 
-uint8_t changed = 0;
-uint32_t count = 0;
+uint8_t changed_A = 0;
+uint32_t count_A = 0;
+uint32_t count_A_old = 0;
+
+uint8_t changed_B = 0;
+uint32_t count_B = 0;
+uint32_t count_B_old = 0;
+
+uint32_t test = 1234567890;
+
+uint8_t update_display = 0;
+
+unsigned long currTime = 0;
+unsigned long oldCurrTime = 0;
 
 void printESP_info(void);
 void checkForUpdates(void);
@@ -62,8 +74,10 @@ void sendOneSpiByte(uint8_t data);
 void DOGM_LCD_init(void);
 void DOGM_LCD_setCursor(uint8_t row, uint8_t col);
 void DOGM_LCD_writeStr(const char *p);
-void waterMeter_ISR();
+void waterMeter_A_ISR();
+void waterMeter_B_ISR();
 void DOGM_LCD_write12digitDec(uint32_t value);
+void oled_LCD_write12digitDec(uint32_t value, uint8_t maxDigits, uint8_t dotPos);
 
 void setup() {
     DEBUG_UART.begin(115200);
@@ -71,14 +85,15 @@ void setup() {
 
     if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
     {
+        delay(1000);
         display.clearDisplay();
         //display.setFont(&FreeMono9pt7b);
         display.setTextSize(1);
-        display.setTextColor(WHITE);
+        display.setTextColor(WHITE, BLACK);
         display.setCursor(0, 0);
         // Display static text
         display.println("Hello world universe");
-        display.setCursor(0, 9);
+        display.setCursor(1, 9);
         display.println("012345678901234567890");
         display.setCursor(0, 17);
         display.println("ABCDEFGHIJKLMNOPQRSTU");
@@ -109,27 +124,31 @@ void setup() {
 
     //DOGM_LCD_setCursor(0, 0);
     //DOGM_LCD_writeStr("RAW:");
+    display.clearDisplay();
+
+    //display.setCursor(0, 0);
+    //display.print("RAW_A:");
+
+    //display.setCursor(0, 8);
+    //display.print("RAW_B:");
     
     //DOGM_LCD_setCursor(1, 0);
     //DOGM_LCD_writeStr("LITERS:0000000.0");
+    //display.setCursor(0, 16);
+    //display.print("LITERS:0000000.0");
     
     //DOGM_LCD_setCursor(2, 0);
     //DOGM_LCD_writeStr("LITER/MIN:0000.0");
+    //display.setCursor(0, 24);
+    //display.print("LITER/MIN:0000.0");
 
-    pinMode(PULSE_INPUT, INPUT_PULLUP);
-    uint8_t intPin = digitalPinToInterrupt(PULSE_INPUT);
-    if (intPin != NOT_AN_INTERRUPT)
-    {
-        attachInterrupt(intPin, waterMeter_ISR, RISING);
-        //DOGM_LCD_setCursor(0, 4);
-        //DOGM_LCD_write12digitDec(0); // set all to zero
-    }
-    else
-    {
-        //DOGM_LCD_setCursor(0, 4);
-        //DOGM_LCD_writeStr("int erroe");
-    }
-    
+    display.display();
+
+    pinMode(PULSE_INPUT_A, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PULSE_INPUT_A), waterMeter_A_ISR, RISING);
+
+    pinMode(PULSE_INPUT_B, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PULSE_INPUT_B), waterMeter_B_ISR, RISING);    
     
     DEBUG_UART.println(F("\r\n!!!!!End of MAIN Setup!!!!!\r\n"));
 }
@@ -138,11 +157,52 @@ void loop() {
     tcp2uart.BridgeMainTask();
     ArduinoOTA.handle();
 
-    if (changed == 1) {
-        changed = 0;
+    currTime = millis();
+
+    if (changed_A == 1) {
+        changed_A = 0;
         //DOGM_LCD_setCursor(0, 4);
         //DOGM_LCD_write12digitDec(count);
         //DOGM_LCD_writeStr("000000000000");
+        display.setCursor(0, 0);
+        oled_LCD_write12digitDec(count_A, 10, 0);
+        display.setCursor(0, 16);
+        oled_LCD_write12digitDec((count_A * 10) / 110, 9, 1);
+        update_display = 1;
+    }
+
+    if (changed_B == 1) {
+        changed_B = 0;
+        //DOGM_LCD_setCursor(0, 4);
+        //DOGM_LCD_write12digitDec(count);
+        //DOGM_LCD_writeStr("000000000000");
+        display.setCursor(66, 0);
+        oled_LCD_write12digitDec(count_B, 10, 0);
+        display.setCursor(66, 16);
+        oled_LCD_write12digitDec((count_B * 10) / 360, 9, 1);
+        update_display = 1;
+    }
+
+    if (currTime - oldCurrTime >= 1000) {
+        oldCurrTime = currTime;
+        display.setCursor(30, 8);
+        oled_LCD_write12digitDec(count_A-count_A_old, 5, 0);
+        display.setCursor(96, 8);
+        oled_LCD_write12digitDec(count_B-count_B_old, 5, 0);
+
+        display.setCursor(30, 24);
+        oled_LCD_write12digitDec(((count_A-count_A_old) * 10 * 60)/110 , 4, 1);
+        display.setCursor(96, 24);
+        oled_LCD_write12digitDec(((count_B-count_B_old) * 10 * 60)/360 , 4, 1);
+
+        update_display = 1;
+        count_A_old = count_A;
+        count_B_old = count_B;
+    }
+    
+    if (update_display == 1) {
+        update_display = 0;
+        display.display();
     }
 
 /*
@@ -156,14 +216,82 @@ void loop() {
     */
 }
 
-void ICACHE_RAM_ATTR waterMeter_ISR() {
-    changed = 1;
-    count++;
+void ICACHE_RAM_ATTR waterMeter_A_ISR() {
+    changed_A = 1;
+    count_A++;
 }
+
+void ICACHE_RAM_ATTR waterMeter_B_ISR() {
+    changed_B = 1;
+    count_B++;
+}
+
 
 void DOGM_LCD_writeOneDigit(uint8_t val) {
     sendOneSpiByte(0x30 + val);
     delayMicroseconds(30);
+}
+
+void oled_LCD_write12digitDec(uint32_t value, uint8_t maxDigits, uint8_t dotPos = 0) {
+    uint32_t rest = value;
+    uint32_t curr = rest / 100000000000;
+    //display.clearDisplay();
+    if (maxDigits >= 12)
+        display.print(curr);
+    rest = rest % 100000000000;
+    curr = rest / 10000000000;
+    if (maxDigits >= 11)
+        display.print(curr);
+    if (dotPos == 10) display.print('.');
+    rest = rest % 10000000000;
+    curr = rest / 1000000000;
+    if (maxDigits >= 10)
+        display.print(curr);
+    if (dotPos == 9) display.print('.');
+    rest = rest % 1000000000;
+    curr = rest / 100000000;
+    if (maxDigits >= 9)
+        display.print(curr);
+    if (dotPos == 8) display.print('.');
+    rest = rest % 100000000;
+    curr = rest / 10000000;
+    if (maxDigits >= 8)
+        display.print(curr);
+    if (dotPos == 7) display.print('.');
+    rest = rest % 10000000;
+    curr = rest / 1000000;
+    if (maxDigits >= 7)
+        display.print(curr);
+    if (dotPos == 6) display.print('.');
+    rest = rest % 1000000;
+    curr = rest / 100000;
+    if (maxDigits >= 6)
+        display.print(curr);
+    if (dotPos == 5) display.print('.');
+    rest = rest % 100000;
+    curr = rest / 10000;
+    if (maxDigits >= 5)
+        display.print(curr);
+    if (dotPos == 4) display.print('.');
+    rest = rest % 10000;
+    curr = rest / 1000;
+    if (maxDigits >= 4)
+        display.print(curr);
+    if (dotPos == 3) display.print('.');
+    rest = rest % 1000;
+    curr = rest / 100;
+    if (maxDigits >= 3)
+        display.print(curr);
+    if (dotPos == 2) display.print('.');
+    rest = rest % 100;
+    curr = rest / 10;
+    if (maxDigits >= 2)
+        display.print(curr);
+    if (dotPos == 1) display.print('.');
+    rest = rest % 10;
+    if (maxDigits >= 1)
+        display.print(rest, 10);
+
 }
 
 void DOGM_LCD_write12digitDec(uint32_t value) {
