@@ -141,6 +141,15 @@ void setup() {
     //DOGM_LCD_writeStr("LITER/MIN:0000.0");
     //display.setCursor(0, 24);
     //display.print("LITER/MIN:0000.0");
+    display.setCursor(0, 0);
+    oled_LCD_write12digitDec(count_A, 10, 0);
+    display.setCursor(0, 16);
+    oled_LCD_write12digitDec((count_A * 10) / 110, 9, 1);
+
+    display.setCursor(68, 0);
+    oled_LCD_write12digitDec(count_B, 10, 0);
+    display.setCursor(68, 16);
+    oled_LCD_write12digitDec((count_B * 10) / 360, 9, 1);
 
     display.display();
 
@@ -176,9 +185,9 @@ void loop() {
         //DOGM_LCD_setCursor(0, 4);
         //DOGM_LCD_write12digitDec(count);
         //DOGM_LCD_writeStr("000000000000");
-        display.setCursor(66, 0);
+        display.setCursor(68, 0);
         oled_LCD_write12digitDec(count_B, 10, 0);
-        display.setCursor(66, 16);
+        display.setCursor(68, 16);
         oled_LCD_write12digitDec((count_B * 10) / 360, 9, 1);
         update_display = 1;
     }
@@ -187,12 +196,12 @@ void loop() {
         oldCurrTime = currTime;
         display.setCursor(30, 8);
         oled_LCD_write12digitDec(count_A-count_A_old, 5, 0);
-        display.setCursor(96, 8);
+        display.setCursor(98, 8);
         oled_LCD_write12digitDec(count_B-count_B_old, 5, 0);
 
         display.setCursor(30, 24);
         oled_LCD_write12digitDec(((count_A-count_A_old) * 10 * 60)/110 , 4, 1);
-        display.setCursor(96, 24);
+        display.setCursor(98, 24);
         oled_LCD_write12digitDec(((count_B-count_B_old) * 10 * 60)/360 , 4, 1);
 
         update_display = 1;
