@@ -52,10 +52,12 @@ unsigned long last_wifi_check_time = 0;
 
 ESP8266WebServer server(HTTP_PORT);
 
+uint32_t pulsesLiter_A = 468;
 uint8_t changed_A = 0;
 uint32_t count_A = 0;
 uint32_t count_A_old = 0;
 
+uint32_t pulsesLiter_B = 360;
 uint8_t changed_B = 0;
 uint32_t count_B = 0;
 uint32_t count_B_old = 0;
@@ -144,12 +146,12 @@ void setup() {
     display.setCursor(0, 0);
     oled_LCD_write12digitDec(count_A, 10, 0);
     display.setCursor(0, 16);
-    oled_LCD_write12digitDec((count_A * 10) / 110, 9, 1);
+    oled_LCD_write12digitDec((count_A * 10) / pulsesLiter_A, 9, 1);
 
     display.setCursor(68, 0);
     oled_LCD_write12digitDec(count_B, 10, 0);
     display.setCursor(68, 16);
-    oled_LCD_write12digitDec((count_B * 10) / 360, 9, 1);
+    oled_LCD_write12digitDec((count_B * 10) / pulsesLiter_B, 9, 1);
 
     display.display();
 
@@ -160,7 +162,16 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PULSE_INPUT_B), waterMeter_B_ISR, RISING);    
     
     DEBUG_UART.println(F("\r\n!!!!!End of MAIN Setup!!!!!\r\n"));
+
+    Wire.beginTransmission(0x38);
+    Wire.write(0xFF); // all led off & all inputs
+    Wire.endTransmission(0x38);
 }
+
+uint8_t keyState = 0;
+uint8_t keyStateOld = 0;
+uint8_t ledState = 0;
+uint8_t rawWrite = 0;
 
 void loop() {
     tcp2uart.BridgeMainTask();
@@ -176,7 +187,7 @@ void loop() {
         display.setCursor(0, 0);
         oled_LCD_write12digitDec(count_A, 10, 0);
         display.setCursor(0, 16);
-        oled_LCD_write12digitDec((count_A * 10) / 110, 9, 1);
+        oled_LCD_write12digitDec((count_A * 10) / pulsesLiter_A, 9, 1);
         update_display = 1;
     }
 
@@ -188,7 +199,7 @@ void loop() {
         display.setCursor(68, 0);
         oled_LCD_write12digitDec(count_B, 10, 0);
         display.setCursor(68, 16);
-        oled_LCD_write12digitDec((count_B * 10) / 360, 9, 1);
+        oled_LCD_write12digitDec((count_B * 10) / pulsesLiter_B, 9, 1);
         update_display = 1;
     }
 
@@ -200,19 +211,36 @@ void loop() {
         oled_LCD_write12digitDec(count_B-count_B_old, 5, 0);
 
         display.setCursor(30, 24);
-        oled_LCD_write12digitDec(((count_A-count_A_old) * 10 * 60)/110 , 4, 1);
+        oled_LCD_write12digitDec(((count_A-count_A_old) * 10 * 60)/pulsesLiter_A , 4, 1);
         display.setCursor(98, 24);
-        oled_LCD_write12digitDec(((count_B-count_B_old) * 10 * 60)/360 , 4, 1);
+        oled_LCD_write12digitDec(((count_B-count_B_old) * 10 * 60)/pulsesLiter_B , 4, 1);
 
         update_display = 1;
         count_A_old = count_A;
         count_B_old = count_B;
+
+        
     }
     
     if (update_display == 1) {
         update_display = 0;
         display.display();
     }
+
+
+    // read and write back to PCF8574A
+    Wire.requestFrom(0x38, 1);
+    keyState = Wire.read();
+
+    rawWrite = 0xFF; // lower nibble is allways key inputs
+    if ((keyState & 0x01) == 0x01) rawWrite &= 0x7F; 
+    if ((keyState & 0x02) == 0x02) rawWrite &= 0xBF;
+    if ((keyState & 0x04) == 0x04) rawWrite &= 0xDF;
+    if ((keyState & 0x08) == 0x08) rawWrite &= 0xEF;
+    
+    Wire.beginTransmission(0x38);
+    Wire.write(rawWrite);
+    Wire.endTransmission(0x38);
 
 /*
     digitalWrite(DOGM_LCD_CS, LOW); // enable Slave Select
