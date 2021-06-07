@@ -4,6 +4,7 @@
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>
 #include <ESP8266httpUpdate.h>
+#include <ESP8266HTTPClient.h>
 #include <EEPROM.h>
 #include "TCP2UART.h"
 #include "SPI.h"
@@ -51,6 +52,8 @@ unsigned long auto_last_change = 0;
 unsigned long last_wifi_check_time = 0;
 
 ESP8266WebServer server(HTTP_PORT);
+HTTPClient http;
+WiFiClient client;
 
 uint32_t pulsesLiter_A = 468;
 uint8_t changed_A = 0;
@@ -67,7 +70,7 @@ uint32_t test = 1234567890;
 uint8_t update_display = 0;
 
 unsigned long currTime = 0;
-unsigned long oldCurrTime = 0;
+unsigned long deltaTime_second = 0;
 
 void printESP_info(void);
 void checkForUpdates(void);
@@ -87,13 +90,16 @@ void setup() {
 
     if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
     {
-        delay(1000);
+        delay(2000);
+        display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+        delay(2000);
         display.clearDisplay();
+        display.display();
         //display.setFont(&FreeMono9pt7b);
         display.setTextSize(1);
         display.setTextColor(WHITE, BLACK);
-        display.setCursor(0, 0);
-        // Display static text
+        //display.setCursor(0, 0);
+        /*// Display static text
         display.println("Hello world universe");
         display.setCursor(1, 9);
         display.println("012345678901234567890");
@@ -101,7 +107,8 @@ void setup() {
         display.println("ABCDEFGHIJKLMNOPQRSTU");
         display.setCursor(0, 25);
         display.println("@!\"#-_+?%&/(){[]};:=");
-        display.display(); 
+        display.display();
+        */
     }
     else{
         DEBUG_UART.println(F("oled init fail"));
@@ -119,7 +126,22 @@ void setup() {
     DEBUG_UART.println(F("trying to connect to saved wifi"));
     //DOGM_LCD_setCursor(1, 0);
     //DOGM_LCD_writeStr("WIFI CONNECTING.");
-    wifiManager.autoConnect(); // using ESP.getChipId() internally
+    display.setCursor(0, 0);
+    display.println("WiFi connecting...");
+    display.display();
+    if (wifiManager.autoConnect() == true) { // using ESP.getChipId() internally
+        display.setCursor(0, 9);
+        display.println("OK");
+        display.setCursor(0, 17);
+        display.println(WiFi.localIP());
+        display.display();
+        delay(2000);
+    } else {
+        display.setCursor(0, 9);
+        display.println("FAIL");
+        display.display();
+        delay(2000);
+    }
     //checkForUpdates();
     setup_BasicOTA();
     tcp2uart.begin();
@@ -127,6 +149,7 @@ void setup() {
     //DOGM_LCD_setCursor(0, 0);
     //DOGM_LCD_writeStr("RAW:");
     display.clearDisplay();
+    display.display();
 
     //display.setCursor(0, 0);
     //display.print("RAW_A:");
@@ -172,6 +195,25 @@ uint8_t keyState = 0;
 uint8_t keyStateOld = 0;
 uint8_t ledState = 0;
 uint8_t rawWrite = 0;
+unsigned long deltaTime_minute = 0;
+
+uint32_t count_A_old2 = 0;
+uint32_t count_B_old2 = 0;
+
+uint32_t calcTotalDeciLiters_A = 0;
+uint32_t calcTotalDeciLiters_B = 0;
+
+uint32_t calcTotalDeciLiters_old_A = 0;
+uint32_t calcTotalDeciLiters_old_B = 0;
+
+uint32_t calcFlow_A = 0;
+uint32_t calcFlow_B = 0;
+
+uint32_t calcFlow_old_A = 0;
+uint32_t calcFlow_old_B = 0;
+
+String urlApi = "";
+int8_t anyChanged = 0;
 
 void loop() {
     tcp2uart.BridgeMainTask();
@@ -187,7 +229,8 @@ void loop() {
         display.setCursor(0, 0);
         oled_LCD_write12digitDec(count_A, 10, 0);
         display.setCursor(0, 16);
-        oled_LCD_write12digitDec((count_A * 10) / pulsesLiter_A, 9, 1);
+        calcTotalDeciLiters_A = (count_A * 10) / pulsesLiter_A;
+        oled_LCD_write12digitDec(calcTotalDeciLiters_A, 9, 1);
         update_display = 1;
     }
 
@@ -199,27 +242,80 @@ void loop() {
         display.setCursor(68, 0);
         oled_LCD_write12digitDec(count_B, 10, 0);
         display.setCursor(68, 16);
-        oled_LCD_write12digitDec((count_B * 10) / pulsesLiter_B, 9, 1);
+        calcTotalDeciLiters_B = (count_B * 10) / pulsesLiter_B;
+        oled_LCD_write12digitDec(calcTotalDeciLiters_B, 9, 1);
         update_display = 1;
     }
 
-    if (currTime - oldCurrTime >= 1000) {
-        oldCurrTime = currTime;
+    if (currTime - deltaTime_second >= 1000) {
+        deltaTime_second = currTime;
         display.setCursor(30, 8);
         oled_LCD_write12digitDec(count_A-count_A_old, 5, 0);
         display.setCursor(98, 8);
         oled_LCD_write12digitDec(count_B-count_B_old, 5, 0);
 
         display.setCursor(30, 24);
-        oled_LCD_write12digitDec(((count_A-count_A_old) * 10 * 60)/pulsesLiter_A , 4, 1);
+        calcFlow_A = ((count_A-count_A_old) * 10 * 60)/pulsesLiter_A;
+        oled_LCD_write12digitDec(calcFlow_A, 4, 1);
         display.setCursor(98, 24);
-        oled_LCD_write12digitDec(((count_B-count_B_old) * 10 * 60)/pulsesLiter_B , 4, 1);
+        calcFlow_B = ((count_B-count_B_old) * 10 * 60)/pulsesLiter_B;
+        oled_LCD_write12digitDec(calcFlow_B, 4, 1);
 
         update_display = 1;
         count_A_old = count_A;
         count_B_old = count_B;
+    }
+    if (currTime - deltaTime_minute >= 30000) {
+        deltaTime_minute = currTime;
 
-        
+        urlApi = "";
+        anyChanged = 0;
+        if (count_A != count_A_old2) {
+            count_A_old2 = count_A;
+            urlApi += "&field1=" + String(count_A);
+            anyChanged = 1;
+        }
+        if (count_B != count_B_old2) {
+            count_B_old2 = count_B;
+            urlApi += "&field2=" + String(count_B);
+            anyChanged = 1;
+        }
+        if (calcTotalDeciLiters_A != calcTotalDeciLiters_old_A) {
+            calcTotalDeciLiters_old_A = calcTotalDeciLiters_A;
+            urlApi += "&field3=" + String((float)calcTotalDeciLiters_A/10.0f, 1);
+            anyChanged = 1;
+        }
+        if (calcTotalDeciLiters_B != calcTotalDeciLiters_old_B) {
+            calcTotalDeciLiters_old_B = calcTotalDeciLiters_B;
+            urlApi += "&field4=" + String((float)calcTotalDeciLiters_B/10.0f, 1);
+            anyChanged = 1;
+        }
+        if (calcFlow_A != calcFlow_old_A) {
+            calcFlow_old_A = calcFlow_A;
+            urlApi += "&field5=" + String((float)calcFlow_A/10.0f, 1);
+            anyChanged = 1;
+        }
+        if (calcFlow_B != calcFlow_old_B) {
+            calcFlow_old_B = calcFlow_B;
+            urlApi += "&field6=" + String((float)calcFlow_B/10.0f, 1);
+            anyChanged = 1;
+        }
+
+        if (anyChanged == 1) {
+            String url = "http://api.thingspeak.com/update?api_key=FUP6M75ELGKWA2J8" + urlApi;
+            http.begin(client, url);
+            
+            int httpCode = http.GET();
+            if (httpCode > 0) {
+                DEBUG_UART.println(F("\r\nGET request sent\r\n"));
+                DEBUG_UART.println(urlApi);
+            }
+            else {
+                DEBUG_UART.println(F("\r\nGET request FAILURE\r\n"));
+                DEBUG_UART.println(urlApi);
+            }
+            http.end();
+        }
     }
     
     if (update_display == 1) {
