@@ -36,6 +36,7 @@ void TCP2UART::BridgeMainTask()
         serialRxBuff[serialRxDataLength++] = '\n';
         if (bridgeClient && bridgeClient.connected())
             bridgeClient.write((const uint8_t*)serialRxBuff, serialRxDataLength);
+        uartMessageReceived = true;
     }
 
     if (bridgeConfigServer.hasClient()) // new connection

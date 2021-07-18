@@ -212,6 +212,19 @@ uint32_t calcFlow_B = 0;
 uint32_t calcFlow_old_A = 0;
 uint32_t calcFlow_old_B = 0;
 
+uint16_t pressure_A = 0;
+uint16_t pressure_B = 0;
+
+uint32_t pressure_average_count = 0;
+uint32_t pressure_A_average_current = 0;
+uint32_t pressure_B_average_current = 0;
+
+uint32_t pressure_A_average = 0;
+uint32_t pressure_B_average = 0;
+
+uint32_t pressure_A_average_old = 0;
+uint32_t pressure_B_average_old = 0;
+
 String urlApi = "";
 int8_t anyChanged = 0;
 
@@ -219,7 +232,38 @@ void loop() {
     tcp2uart.BridgeMainTask();
     ArduinoOTA.handle();
 
+    if (tcp2uart.uartMessageReceived == true) {
+        tcp2uart.uartMessageReceived = false;
+        if (tcp2uart.serialRxBuff[0] == '@' && // start of message
+            tcp2uart.serialRxBuff[1] == 'S' && // Slave response
+            tcp2uart.serialRxBuff[2] == 'P' && // Pressure
+            tcp2uart.serialRxBuff[3] == 'S' ) { // Sensor
+            for (int i = 5; i < 14; i++)
+                tcp2uart.serialRxBuff[i] -= 0x30;
+            pressure_A = tcp2uart.serialRxBuff[5] * 1000 + tcp2uart.serialRxBuff[6] * 100 + tcp2uart.serialRxBuff[7] * 10 + tcp2uart.serialRxBuff[8];
+            pressure_B = tcp2uart.serialRxBuff[10] * 1000 + tcp2uart.serialRxBuff[11] * 100 + tcp2uart.serialRxBuff[12] * 10 + tcp2uart.serialRxBuff[13];
+
+            if (pressure_average_count == 0) {
+                pressure_A_average_current = pressure_A;
+                pressure_B_average_current = pressure_B;
+                pressure_average_count = 1;
+            } else if (pressure_average_count == 10) {
+                pressure_average_count = 0;
+                pressure_A_average = pressure_A_average_current / 10;
+                pressure_B_average = pressure_B_average_current / 10;
+                pressure_A_average_current = 0;
+                pressure_B_average_current = 0;
+            } else {
+                pressure_average_count++;
+                pressure_A_average_current += pressure_A;
+                pressure_B_average_current += pressure_B;
+            }
+            
+        }
+    }
     currTime = millis();
+
+
 
     if (changed_A == 1) {
         changed_A = 0;
@@ -249,10 +293,14 @@ void loop() {
 
     if (currTime - deltaTime_second >= 1000) {
         deltaTime_second = currTime;
-        display.setCursor(30, 8);
-        oled_LCD_write12digitDec(count_A-count_A_old, 5, 0);
-        display.setCursor(98, 8);
-        oled_LCD_write12digitDec(count_B-count_B_old, 5, 0);
+        display.setCursor(0, 8);
+        oled_LCD_write12digitDec(pressure_A, 4, 0);
+        display.setCursor(36, 8);
+        oled_LCD_write12digitDec(pressure_A_average, 4, 0);
+        display.setCursor(68, 8);
+        oled_LCD_write12digitDec(pressure_B, 4, 0);
+        display.setCursor(104, 8);
+        oled_LCD_write12digitDec(pressure_B_average, 4, 0);
 
         display.setCursor(30, 24);
         calcFlow_A = ((count_A-count_A_old) * 10 * 60)/pulsesLiter_A;
@@ -298,6 +346,16 @@ void loop() {
         if (calcFlow_B != calcFlow_old_B) {
             calcFlow_old_B = calcFlow_B;
             urlApi += "&field6=" + String((float)calcFlow_B/10.0f, 1);
+            anyChanged = 1;
+        }
+        if (pressure_A_average != pressure_A_average_old) {
+            pressure_A_average_old = pressure_A_average;
+            urlApi += "&field7=" + String(pressure_A_average);
+            anyChanged = 1;
+        }
+        if (pressure_B_average != pressure_B_average_old) {
+            pressure_B_average_old = pressure_B_average;
+            urlApi += "&field8=" + String(pressure_B_average);
             anyChanged = 1;
         }
 

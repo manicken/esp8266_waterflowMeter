@@ -31,10 +31,11 @@ class TCP2UART
         typedef std::function<void(void)> THandlerFunction;
         bool bridgeInConfigMode = false;
         bool bridgeClientConnected = false;
+        bool uartMessageReceived = false;
         size_t rxBuffSize = 255;
 
         SerialConfig serialConfig = SERIAL_8N1;
-        unsigned long serialBaud = 115200;
+        unsigned long serialBaud = 19200;
         uint8_t * serialRxBuff;
         size_t serialRxDataLength = 0; // current data length
 
